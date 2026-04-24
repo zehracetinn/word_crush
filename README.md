@@ -118,3 +118,29 @@ Projeyi GitHub’dan çekmek için:
 ```bash
 git clone https://github.com/zehracetinn/word_crush.git
 cd word_crush
+
+Paketleri Yükleme
+
+Projeyi ilk kez açan kişi aşağıdaki komutu çalıştırmalıdır:
+
+npm install
+Projeyi Başlatma
+
+Metro bundler başlatmak için:
+
+npx expo start
+
+
+---
+##
+Telefonda Açma
+iPhone için
+App Store’dan Expo Go uygulamasını indir
+Terminalde çıkan QR kodu iPhone kamerasıyla okut
+Projeyi Expo Go ile aç
+Android için
+Play Store’dan Expo Go uygulamasını indir
+QR kodu okut
+Uygulamayı aç
+
+---
