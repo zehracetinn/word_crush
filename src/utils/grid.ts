@@ -15,7 +15,7 @@ function getRandomWeightedLetter(): string {
   return 'A';
 }
 
-function createCell(row: number, col: number): Cell {
+export function createRandomCell(row: number, col: number): Cell {
   return {
     id: `${row}-${col}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     row,
@@ -29,7 +29,7 @@ function createCell(row: number, col: number): Cell {
 
 export function generateBoard(size: number): Cell[][] {
   return Array.from({ length: size }, (_, row) =>
-    Array.from({ length: size }, (_, col) => createCell(row, col))
+    Array.from({ length: size }, (_, col) => createRandomCell(row, col))
   );
 }
 
