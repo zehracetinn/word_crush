@@ -1,50 +1,120 @@
-# Welcome to your Expo app 👋
+# Word Crush Mobil Oyunu
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Kocaeli Üniversitesi Bilgisayar Mühendisliği Bölümü  
+Yazılım Laboratuvarı-II dersi kapsamında geliştirilen mobil kelime oyunu projesidir.
 
-## Get started
+---
 
-1. Install dependencies
+## Proje Amacı
 
-   ```bash
-   npm install
-   ```
+Bu projede amaç, oyuncunun grid üzerinde bulunan harfleri kullanarak anlamlı kelimeler oluşturduğu bir mobil oyun geliştirmektir.
 
-2. Start the app
+Oyuncu oyun ekranındaki harfleri kullanarak kelimeler oluşturur. Geçerli kelimeler oyun alanından kaldırılır, üstte kalan harfler aşağı düşer ve boş kalan yerlere yeni harfler gelir. Oyuncu verilen hamle sayısı içerisinde en yüksek puanı elde etmeye çalışır.
 
-   ```bash
-   npx expo start
-   ```
+Bu oyunun temel amacı:
 
-In the output, you'll find options to open the app in a
+- kelime bilgisi kullanımını artırmak
+- stratejik düşünmeyi desteklemek
+- mobil programlama ile dinamik bir oyun geliştirmektir
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Proje Özeti
 
-## Get a fresh project
+Word Crush, iki boyutlu kare grid yapısına sahip bir mobil kelime oyunudur. Her hücrede bir harf bulunur. Oyuncu bu harfleri komşuluk kurallarına uygun şekilde birleştirerek kelime oluşturur.
 
-When you're ready, run:
+Geçerli kelimeler:
+- puan kazandırır
+- oyun alanından kaldırılır
+- harflerin aşağı düşmesini sağlar
+- boş alanlara yeni harflerin gelmesine neden olur
+
+Geçersiz kelimeler:
+- iptal edilir
+- harfler eski haline döner
+- yine de hamle azaltır
+
+---
+
+## Ders İsterlerine Uyum
+
+Bu projede:
+
+- uygulama **mobil** olarak geliştirilmektedir
+- oyun **telefon veya emülatör** üzerinde çalıştırılacaktır
+- **web veya masaüstü gösterimi kabul edilmez**
+- kullanıcıdan ilk açılışta kullanıcı adı alınır ve saklanır
+- ana ekranda:
+  - Yeni Oyun
+  - Skor Tablosu
+  - Market  
+  seçenekleri bulunur
+- grid seçenekleri:
+  - 10x10 → Kolay
+  - 8x8 → Orta
+  - 6x6 → Zor
+
+---
+
+## Kullanılan Teknolojiler
+
+- React Native
+- Expo
+- TypeScript
+- Zustand
+- AsyncStorage
+- React Native Gesture Handler
+- React Native Reanimated
+
+---
+
+## Projenin Mevcut Durumu
+
+Şu anda tamamlanan kısımlar:
+
+- Expo tabanlı proje kurulumu
+- TypeScript altyapısı
+- kullanıcı adı alma ekranı
+- kullanıcı adını kalıcı saklama
+- ana ekran
+- yeni oyun ayar ekranı
+- skor tablosu ekran iskeleti
+- market ekran iskeleti
+- oyun ekranı iskeleti
+- grid üretimi için temel altyapı
+- ağırlıklı harf üretimi için temel mantık
+
+Henüz tamamlanmayan kısımlar:
+
+- sürükleyerek harf seçme
+- komşuluk kontrolü
+- sözlük doğrulama
+- puan hesaplama akışı
+- harf patlatma
+- gravity ve refill sistemi
+- skor geçmişi kaydı
+- joker satın alma ve kullanma
+- combo sistemi
+- gridde kelime kalmama kontrolü
+
+---
+
+## Gereksinimler
+
+Projeyi çalıştırmadan önce bilgisayarda şunların kurulu olması gerekir:
+
+- Node.js
+- npm
+- Expo Go uygulaması  
+  - iPhone için App Store
+  - Android için Google Play Store
+
+---
+
+## Projeyi Bilgisayara Alma
+
+Projeyi GitHub’dan çekmek için:
 
 ```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+git clone https://github.com/zehracetinn/word_crush.git
+cd word_crush
