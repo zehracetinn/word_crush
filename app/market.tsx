@@ -1,19 +1,22 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { JOKER_DEFINITIONS } from '../src/constants/joker-definitions';
 import { useAppStore } from '../src/store/app-store';
 import { COLORS } from '../src/theme/colors';
 
-const jokers = [
-  { name: 'Balık', cost: 100, desc: 'Gridde rastgele harfleri yok eder.' },
-  { name: 'Tekerlek', cost: 200, desc: 'Seçilen harfin satır ve sütununu temizler.' },
-  { name: 'Lolipop Kırıcı', cost: 75, desc: 'Seçilen tek bir harfi yok eder.' },
-  { name: 'Serbest Değiştirme', cost: 125, desc: 'Komşu iki harfin yerini değiştirir.' },
-  { name: 'Harf Karıştırma', cost: 300, desc: 'Tüm grid harflerini karıştırır.' },
-  { name: 'Parti Güçlendiricisi', cost: 400, desc: 'Tüm gridi sıfırlar ve yeniden doldurur.' },
-];
-
 export default function MarketScreen() {
-  const { profile } = useAppStore();
+  const { profile, buyJoker } = useAppStore();
+
+  const handleBuy = async (jokerId: (typeof JOKER_DEFINITIONS)[number]['id']) => {
+    try {
+      await buyJoker(jokerId);
+      Alert.alert('Başarılı', 'Joker satın alındı.');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Satın alma sırasında hata oluştu.';
+      Alert.alert('Satın alma başarısız', message);
+    }
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -22,20 +25,42 @@ export default function MarketScreen() {
       </Pressable>
 
       <Text style={styles.title}>Market</Text>
-      <Text style={styles.subtitle}>Joker sistemi bir sonraki sprintte aktif olacak.</Text>
+      <Text style={styles.subtitle}>Buradan joker satın alabilirsin.</Text>
 
       <View style={styles.goldCard}>
         <Text style={styles.goldLabel}>Mevcut Altın</Text>
         <Text style={styles.goldValue}>{profile?.gold ?? 0}</Text>
       </View>
 
-      {jokers.map((joker) => (
-        <View key={joker.name} style={styles.card}>
-          <Text style={styles.cardTitle}>{joker.name}</Text>
-          <Text style={styles.cardDesc}>{joker.desc}</Text>
-          <Text style={styles.cardCost}>Maliyet: {joker.cost} altın</Text>
-        </View>
-      ))}
+      {JOKER_DEFINITIONS.map((joker) => {
+        const owned = profile?.ownedJokers?.[joker.id] ?? 0;
+        const canBuy = (profile?.gold ?? 0) >= joker.cost;
+
+        return (
+          <View key={joker.id} style={styles.card}>
+            <View style={styles.cardTop}>
+              <Text style={styles.cardEmoji}>{joker.shortLabel}</Text>
+              <View style={styles.cardTopText}>
+                <Text style={styles.cardTitle}>{joker.name}</Text>
+                <Text style={styles.cardCost}>Maliyet: {joker.cost} altın</Text>
+              </View>
+            </View>
+
+            <Text style={styles.cardDesc}>{joker.description}</Text>
+            <Text style={styles.ownedText}>Sahip olunan: {owned}</Text>
+
+            <Pressable
+              style={[styles.buyButton, !canBuy && styles.disabledButton]}
+              disabled={!canBuy}
+              onPress={() => void handleBuy(joker.id)}
+            >
+              <Text style={styles.buyButtonText}>
+                {canBuy ? 'Satın Al' : 'Altın Yetersiz'}
+              </Text>
+            </Pressable>
+          </View>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -96,22 +121,54 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     marginBottom: 12,
-    gap: 6,
+    gap: 8,
+  },
+  cardTop: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  cardEmoji: {
+    fontSize: 28,
+  },
+  cardTopText: {
+    flex: 1,
   },
   cardTitle: {
     fontSize: 19,
     fontWeight: '800',
     color: COLORS.text,
   },
+  cardCost: {
+    fontSize: 14,
+    color: COLORS.primaryDark,
+    fontWeight: '700',
+    marginTop: 2,
+  },
   cardDesc: {
     fontSize: 14,
     color: COLORS.mutedText,
     lineHeight: 20,
   },
-  cardCost: {
-    marginTop: 4,
-    fontSize: 14,
+  ownedText: {
+    fontSize: 13,
+    color: COLORS.text,
     fontWeight: '700',
-    color: COLORS.primaryDark,
+  },
+  buyButton: {
+    marginTop: 4,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  buyButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

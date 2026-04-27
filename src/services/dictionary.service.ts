@@ -81,6 +81,12 @@ class DictionaryService {
   getWordCount(): number {
     return this.wordSet.size;
   }
+
+  getWordsByLength(minLength: number, maxLength: number = minLength): string[] {
+    return Array.from(this.wordSet).filter(
+      (word) => word.length >= minLength && word.length <= maxLength
+    );
+  }
 }
 
 export const dictionaryService = new DictionaryService();
