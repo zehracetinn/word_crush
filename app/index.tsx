@@ -3,13 +3,17 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useAppStore } from '../src/store/app-store';
 import { COLORS } from '../src/theme/colors';
+import { dictionaryService } from '../src/services/dictionary.service';
 
 export default function IndexScreen() {
   const { init, isReady, profile } = useAppStore();
 
   useEffect(() => {
-    init();
-  }, [init]);
+  (async () => {
+    await init();
+    await dictionaryService.init();
+  })();
+}, [init]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -25,7 +29,7 @@ export default function IndexScreen() {
     <View style={styles.container}>
       <ActivityIndicator size="large" color={COLORS.primary} />
       <Text style={styles.title}>Word Crush hazırlanıyor...</Text>
-      <Text style={styles.subtitle}>İlk açılış kontrol ediliyor</Text>
+      <Text style={styles.subtitle}>Profil ve sözlük yükleniyor</Text>
     </View>
   );
 }
