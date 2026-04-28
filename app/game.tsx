@@ -21,6 +21,7 @@ import { useAppStore } from '../src/store/app-store';
 import { COLORS } from '../src/theme/colors';
 import {
   resolveBoardAfterMatch,
+  resolveBoardAfterRowAndColumnRemoval,
   resolveBoardAfterSingleCellRemoval,
   shuffleBoardForJoker,
 } from '../src/utils/board-actions';
@@ -67,7 +68,7 @@ export default function GameScreen() {
   const gameStartedAtRef = useRef<number>(Date.now());
   const selectedPathRef = useRef<Cell[]>([]);
   const dragMovedRef = useRef(false);
-  const lastLollipopGestureAtRef = useRef(0);
+  const lastTargetedJokerGestureAtRef = useRef(0);
 
   const { profile, refreshProfile, consumeJoker } = useAppStore();
 
@@ -164,8 +165,12 @@ export default function GameScreen() {
     switch (jokerId) {
       case 'lollipop':
         return 'Bir hücreye dokun. Seçilen tek harf silinip tahta aşağı düşecek.';
+      case 'wheel':
+        return 'Bir hücreye dokun. O hücrenin satırı ve sütunu temizlenecek.';
       case 'shuffle':
         return 'Tahtadaki harfleri karıştırmak için aşağıdaki uygula butonunu kullan.';
+      case 'party':
+        return 'Tüm gridi sıfırlayıp oynanabilir yeni tahta kurmak için aşağıdaki uygula butonunu kullan.';
       default:
         return 'Etkiyi bir sonraki sprintte bağlayacağız.';
     }
@@ -174,7 +179,12 @@ export default function GameScreen() {
   const handleSelectJoker = (jokerId: JokerId) => {
     const nextJokerId = selectedJokerId === jokerId ? null : jokerId;
 
-    if (nextJokerId === 'lollipop' || nextJokerId === 'shuffle') {
+    if (
+      nextJokerId === 'lollipop' ||
+      nextJokerId === 'wheel' ||
+      nextJokerId === 'shuffle' ||
+      nextJokerId === 'party'
+    ) {
       dragMovedRef.current = false;
       syncSelection([]);
     }
@@ -387,6 +397,44 @@ export default function GameScreen() {
     }
   };
 
+  const applyWheelJoker = async (cell: Cell) => {
+    if (!ensureJokerReady('wheel')) {
+      return;
+    }
+
+    try {
+      setIsApplyingJoker(true);
+
+      const nextBoard = resolveBoardAfterRowAndColumnRemoval(board, cell);
+      const analysis = analyzeBoard(nextBoard);
+
+      await consumeJoker('wheel');
+
+      setSelectedJokerId(null);
+
+      if (analysis.possibleWordCount === 0) {
+        const fallback = generateSmartPlayableBoard(board.length);
+        setPossibleWordCount(fallback.analysis.possibleWordCount);
+        syncSelection([], fallback.board);
+        setSelectionMessage(
+          `Tekerlek kullanıldı. ${cell.letter} harfinin satır ve sütunu temizlendi; tahta oynanabilir kalsın diye yeniden kuruldu.`
+        );
+        return;
+      }
+
+      setPossibleWordCount(analysis.possibleWordCount);
+      syncSelection([], nextBoard);
+      setSelectionMessage(
+        `Tekerlek kullanıldı. ${cell.letter} harfinin satır ve sütunu temizlendi, gravity ve refill uygulandı.`
+      );
+    } catch (error) {
+      console.error('Tekerlek kullanılamadı:', error);
+      setSelectionMessage('Tekerlek uygulanamadı.');
+    } finally {
+      setIsApplyingJoker(false);
+    }
+  };
+
   const applyShuffleJoker = async () => {
     if (!ensureJokerReady('shuffle')) {
       return;
@@ -415,17 +463,60 @@ export default function GameScreen() {
     }
   };
 
-  const shouldIgnoreRecentLollipopTap = (): boolean => {
-    if (Date.now() - lastLollipopGestureAtRef.current >= 300) {
+  const applyPartyJoker = async () => {
+    if (!ensureJokerReady('party')) {
+      return;
+    }
+
+    try {
+      setIsApplyingJoker(true);
+
+      const {
+        board: playableBoard,
+        analysis,
+        guaranteedWord,
+      } = generateSmartPlayableBoard(board.length);
+
+      await consumeJoker('party');
+
+      setSelectedJokerId(null);
+      setPossibleWordCount(analysis.possibleWordCount);
+      syncSelection([], playableBoard);
+      setSelectionMessage(
+        guaranteedWord
+          ? `Parti Güçlendiricisi kullanıldı. Tüm grid yenilendi ve ${guaranteedWord.length} harflik oynanabilir fırsat yerleştirildi.`
+          : 'Parti Güçlendiricisi kullanıldı. Tüm grid temizlenip oynanabilir yeni tahta kuruldu.'
+      );
+    } catch (error) {
+      console.error('Parti Güçlendiricisi kullanılamadı:', error);
+      setSelectionMessage('Parti Güçlendiricisi uygulanamadı.');
+    } finally {
+      setIsApplyingJoker(false);
+    }
+  };
+
+  const shouldIgnoreRecentTargetedJokerTap = (): boolean => {
+    if (Date.now() - lastTargetedJokerGestureAtRef.current >= 300) {
       return false;
     }
 
-    lastLollipopGestureAtRef.current = 0;
+    lastTargetedJokerGestureAtRef.current = 0;
     return true;
   };
 
+  const handleApplySelectedJoker = () => {
+    if (selectedJokerId === 'shuffle') {
+      void applyShuffleJoker();
+      return;
+    }
+
+    if (selectedJokerId === 'party') {
+      void applyPartyJoker();
+    }
+  };
+
   const handleTilePress = (cell: Cell) => {
-    if (shouldIgnoreRecentLollipopTap()) {
+    if (shouldIgnoreRecentTargetedJokerTap()) {
       return;
     }
 
@@ -434,9 +525,14 @@ export default function GameScreen() {
       return;
     }
 
-    if (selectedJokerId === 'shuffle') {
+    if (selectedJokerId === 'wheel') {
+      void applyWheelJoker(cell);
+      return;
+    }
+
+    if (selectedJokerId === 'shuffle' || selectedJokerId === 'party') {
       setSelectionMessage(
-        `Seçilen joker: ${JOKER_MAP.shuffle.name}. ${getActiveJokerInstruction('shuffle')}`
+        `Seçilen joker: ${JOKER_MAP[selectedJokerId].name}. ${getActiveJokerInstruction(selectedJokerId)}`
       );
       return;
     }
@@ -447,15 +543,20 @@ export default function GameScreen() {
   const handleDragStart = (cell: Cell) => {
     dragMovedRef.current = false;
 
-    if (selectedJokerId === 'lollipop') {
-      lastLollipopGestureAtRef.current = Date.now();
-      void applyLollipopJoker(cell);
+    if (selectedJokerId === 'lollipop' || selectedJokerId === 'wheel') {
+      lastTargetedJokerGestureAtRef.current = Date.now();
+
+      if (selectedJokerId === 'lollipop') {
+        void applyLollipopJoker(cell);
+      } else {
+        void applyWheelJoker(cell);
+      }
       return;
     }
 
-    if (selectedJokerId === 'shuffle') {
+    if (selectedJokerId === 'shuffle' || selectedJokerId === 'party') {
       setSelectionMessage(
-        `Seçilen joker: ${JOKER_MAP.shuffle.name}. ${getActiveJokerInstruction('shuffle')}`
+        `Seçilen joker: ${JOKER_MAP[selectedJokerId].name}. ${getActiveJokerInstruction(selectedJokerId)}`
       );
       return;
     }
@@ -464,7 +565,12 @@ export default function GameScreen() {
   };
 
   const handleDragMove = (cell: Cell) => {
-    if (selectedJokerId === 'lollipop' || selectedJokerId === 'shuffle') {
+    if (
+      selectedJokerId === 'lollipop' ||
+      selectedJokerId === 'wheel' ||
+      selectedJokerId === 'shuffle' ||
+      selectedJokerId === 'party'
+    ) {
       return;
     }
 
@@ -475,7 +581,12 @@ export default function GameScreen() {
   };
 
   const handleDragEnd = () => {
-    if (selectedJokerId === 'lollipop' || selectedJokerId === 'shuffle') {
+    if (
+      selectedJokerId === 'lollipop' ||
+      selectedJokerId === 'wheel' ||
+      selectedJokerId === 'shuffle' ||
+      selectedJokerId === 'party'
+    ) {
       return;
     }
 
@@ -686,10 +797,10 @@ export default function GameScreen() {
             {JOKER_MAP[selectedJokerId].name}: {getActiveJokerInstruction(selectedJokerId)}
           </Text>
 
-          {selectedJokerId === 'shuffle' && (
+          {(selectedJokerId === 'shuffle' || selectedJokerId === 'party') && (
             <Pressable
               style={[styles.jokerActionButton, isInteractionLocked && styles.disabledButton]}
-              onPress={() => void applyShuffleJoker()}
+              onPress={handleApplySelectedJoker}
               disabled={isInteractionLocked}
             >
               <Text style={styles.jokerActionButtonText}>Seçili Jokeri Uygula</Text>

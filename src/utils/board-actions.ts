@@ -146,6 +146,24 @@ export function resolveBoardAfterSingleCellRemoval(
   return resolveBoardAfterMatch(board, [targetCell]);
 }
 
+export function resolveBoardAfterRowAndColumnRemoval(
+  board: Cell[][],
+  targetCell: Cell
+): Cell[][] {
+  return resolveBoardAfterMatch(board, [targetCell], {
+    activatedSpecialCells: [
+      {
+        ...targetCell,
+        specialType: 'row',
+      },
+      {
+        ...targetCell,
+        specialType: 'column',
+      },
+    ],
+  });
+}
+
 export function shuffleBoardForJoker(
   board: Cell[][],
   maxAttempts: number = 30
