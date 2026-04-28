@@ -1,6 +1,11 @@
 import { Cell, SpecialType } from '../models/cell';
 import { BoardAnalysis, analyzeBoard } from './board-analyzer';
-import { createRandomCell, shuffleBoardContents } from './grid';
+import {
+  createRandomCell,
+  flattenBoard,
+  shuffleArray,
+  shuffleBoardContents,
+} from './grid';
 import { generateSmartPlayableBoard } from './smart-board-generator';
 import { cellKey } from './selection';
 import { getAffectedCellsBySpecial } from './powerups';
@@ -8,6 +13,11 @@ import { getAffectedCellsBySpecial } from './powerups';
 interface ResolveBoardOptions {
   createdSpecialType?: SpecialType | null;
   activatedSpecialCells?: Cell[];
+}
+
+export interface RandomRemovalResult {
+  board: Cell[][];
+  removedCells: Cell[];
 }
 
 export interface ShuffleBoardResult {
@@ -146,6 +156,19 @@ export function resolveBoardAfterSingleCellRemoval(
   return resolveBoardAfterMatch(board, [targetCell]);
 }
 
+export function resolveBoardAfterRandomRemoval(
+  board: Cell[][],
+  removalCount: number
+): RandomRemovalResult {
+  const clampedCount = Math.max(1, Math.min(removalCount, board.length * board.length));
+  const removedCells = shuffleArray(flattenBoard(board)).slice(0, clampedCount);
+
+  return {
+    board: resolveBoardAfterMatch(board, removedCells),
+    removedCells,
+  };
+}
+
 export function resolveBoardAfterRowAndColumnRemoval(
   board: Cell[][],
   targetCell: Cell
@@ -162,6 +185,29 @@ export function resolveBoardAfterRowAndColumnRemoval(
       },
     ],
   });
+}
+
+export function swapBoardCells(
+  board: Cell[][],
+  firstCell: Cell,
+  secondCell: Cell
+): Cell[][] {
+  return board.map((row, rowIndex) =>
+    row.map((cell, colIndex) => {
+      if (rowIndex === firstCell.row && colIndex === firstCell.col) {
+        return cloneFallingCell(board[secondCell.row][secondCell.col], rowIndex, colIndex);
+      }
+
+      if (rowIndex === secondCell.row && colIndex === secondCell.col) {
+        return cloneFallingCell(board[firstCell.row][firstCell.col], rowIndex, colIndex);
+      }
+
+      return {
+        ...cell,
+        isSelected: false,
+      };
+    })
+  );
 }
 
 export function shuffleBoardForJoker(

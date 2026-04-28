@@ -21,9 +21,11 @@ import { useAppStore } from '../src/store/app-store';
 import { COLORS } from '../src/theme/colors';
 import {
   resolveBoardAfterMatch,
+  resolveBoardAfterRandomRemoval,
   resolveBoardAfterRowAndColumnRemoval,
   resolveBoardAfterSingleCellRemoval,
   shuffleBoardForJoker,
+  swapBoardCells,
 } from '../src/utils/board-actions';
 import { analyzeBoard } from '../src/utils/board-analyzer';
 import {
@@ -39,6 +41,7 @@ import {
   isSameCell,
 } from '../src/utils/selection';
 import { generateSmartPlayableBoard } from '../src/utils/smart-board-generator';
+import { analyzeComboWords, type ComboAnalysis } from '../src/utils/combo';
 
 export default function GameScreen() {
   const { gridSize, moves, difficulty } = useLocalSearchParams<{
@@ -64,6 +67,7 @@ export default function GameScreen() {
   const [isFinishingGame, setIsFinishingGame] = useState(false);
   const [selectedJokerId, setSelectedJokerId] = useState<JokerId | null>(null);
   const [isApplyingJoker, setIsApplyingJoker] = useState(false);
+  const [lastComboAnalysis, setLastComboAnalysis] = useState<ComboAnalysis | null>(null);
 
   const gameStartedAtRef = useRef<number>(Date.now());
   const selectedPathRef = useRef<Cell[]>([]);
@@ -151,6 +155,7 @@ export default function GameScreen() {
     setScore(0);
     setMovesLeft(parsedMoves);
     setFoundWords([]);
+    setLastComboAnalysis(null);
     setSelectedJokerId(null);
     prepareFreshBoard('Yeni oyun hazırlandı.');
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -161,12 +166,24 @@ export default function GameScreen() {
     setSelectionMessage('Seçim temizlendi.');
   };
 
+  const getComboSummaryText = (comboAnalysis: ComboAnalysis): string => {
+    if (!comboAnalysis.hasCombo) {
+      return ' Combo bulunamadı.';
+    }
+
+    return ` Combo: ${comboAnalysis.bonusWords.join(', ')}. Ek +${comboAnalysis.bonusScore} puan.`;
+  };
+
   const getActiveJokerInstruction = (jokerId: JokerId): string => {
     switch (jokerId) {
-      case 'lollipop':
-        return 'Bir hücreye dokun. Seçilen tek harf silinip tahta aşağı düşecek.';
+      case 'fish':
+        return 'Gridde birkaç harfi temizlemek için aşağıdaki uygula butonunu kullan.';
       case 'wheel':
         return 'Bir hücreye dokun. O hücrenin satırı ve sütunu temizlenecek.';
+      case 'lollipop':
+        return 'Bir hücreye dokun. Seçilen tek harf silinip tahta aşağı düşecek.';
+      case 'swap':
+        return 'Önce bir hücre, sonra ona komşu ikinci hücreyi seç. Seçilen iki hücre yer değiştirecek.';
       case 'shuffle':
         return 'Tahtadaki harfleri karıştırmak için aşağıdaki uygula butonunu kullan.';
       case 'party':
@@ -180,8 +197,11 @@ export default function GameScreen() {
     const nextJokerId = selectedJokerId === jokerId ? null : jokerId;
 
     if (
-      nextJokerId === 'lollipop' ||
+      selectedJokerId === 'swap' ||
+      nextJokerId === 'fish' ||
       nextJokerId === 'wheel' ||
+      nextJokerId === 'lollipop' ||
+      nextJokerId === 'swap' ||
       nextJokerId === 'shuffle' ||
       nextJokerId === 'party'
     ) {
@@ -203,6 +223,7 @@ export default function GameScreen() {
       return;
     }
 
+    setLastComboAnalysis(null);
     prepareFreshBoard('Tahta yeniden üretildi.');
   };
 
@@ -359,6 +380,52 @@ export default function GameScreen() {
     return true;
   };
 
+  const getFishRemovalCount = (size: number): number => {
+    return Math.min(5, Math.max(3, Math.floor((size * size) / 16)));
+  };
+
+  const applyFishJoker = async () => {
+    if (!ensureJokerReady('fish')) {
+      return;
+    }
+
+    try {
+      setIsApplyingJoker(true);
+
+      const removalCount = getFishRemovalCount(board.length);
+      const { board: nextBoard, removedCells } = resolveBoardAfterRandomRemoval(
+        board,
+        removalCount
+      );
+      const analysis = analyzeBoard(nextBoard);
+
+      await consumeJoker('fish');
+
+      setSelectedJokerId(null);
+
+      if (analysis.possibleWordCount === 0) {
+        const fallback = generateSmartPlayableBoard(board.length);
+        setPossibleWordCount(fallback.analysis.possibleWordCount);
+        syncSelection([], fallback.board);
+        setSelectionMessage(
+          `Balık kullanıldı. ${removedCells.length} rastgele harf silindi ve tahta oynanabilir kalsın diye yeniden kuruldu.`
+        );
+        return;
+      }
+
+      setPossibleWordCount(analysis.possibleWordCount);
+      syncSelection([], nextBoard);
+      setSelectionMessage(
+        `Balık kullanıldı. ${removedCells.length} rastgele harf silindi, gravity ve refill uygulandı.`
+      );
+    } catch (error) {
+      console.error('Balık kullanılamadı:', error);
+      setSelectionMessage('Balık uygulanamadı.');
+    } finally {
+      setIsApplyingJoker(false);
+    }
+  };
+
   const applyLollipopJoker = async (cell: Cell) => {
     if (!ensureJokerReady('lollipop')) {
       return;
@@ -435,6 +502,73 @@ export default function GameScreen() {
     }
   };
 
+  const applySwapJoker = async (firstCell: Cell, secondCell: Cell) => {
+    if (!ensureJokerReady('swap')) {
+      return;
+    }
+
+    try {
+      setIsApplyingJoker(true);
+
+      const nextBoard = swapBoardCells(board, firstCell, secondCell);
+      const analysis = analyzeBoard(nextBoard);
+
+      await consumeJoker('swap');
+
+      setSelectedJokerId(null);
+
+      if (analysis.possibleWordCount === 0) {
+        const fallback = generateSmartPlayableBoard(board.length);
+        setPossibleWordCount(fallback.analysis.possibleWordCount);
+        syncSelection([], fallback.board);
+        setSelectionMessage(
+          'Serbest Değiştirme kullanıldı. Komşu iki hücre yer değiştirdi; tahta oynanabilir kalsın diye yeni tahta kuruldu.'
+        );
+        return;
+      }
+
+      setPossibleWordCount(analysis.possibleWordCount);
+      syncSelection([], nextBoard);
+      setSelectionMessage(
+        'Serbest Değiştirme kullanıldı. Seçilen komşu iki hücre yer değiştirdi.'
+      );
+    } catch (error) {
+      console.error('Serbest Değiştirme kullanılamadı:', error);
+      setSelectionMessage('Serbest Değiştirme uygulanamadı.');
+    } finally {
+      setIsApplyingJoker(false);
+    }
+  };
+
+  const handleSwapCellSelection = async (cell: Cell) => {
+    if (!ensureJokerReady('swap')) {
+      return;
+    }
+
+    const firstCell = selectedPathRef.current[0];
+
+    if (!firstCell) {
+      syncSelection([cell]);
+      setSelectionMessage(
+        `Serbest Değiştirme: ilk hücre seçildi (${cell.letter}). Şimdi komşu ikinci hücreyi seç.`
+      );
+      return;
+    }
+
+    if (isSameCell(cell, firstCell)) {
+      syncSelection([]);
+      setSelectionMessage('Serbest Değiştirme için ilk seçim kaldırıldı.');
+      return;
+    }
+
+    if (!areAdjacent(firstCell, cell)) {
+      setSelectionMessage('Serbest Değiştirme için ikinci hücre ilk seçime komşu olmalı.');
+      return;
+    }
+
+    await applySwapJoker(firstCell, cell);
+  };
+
   const applyShuffleJoker = async () => {
     if (!ensureJokerReady('shuffle')) {
       return;
@@ -505,6 +639,11 @@ export default function GameScreen() {
   };
 
   const handleApplySelectedJoker = () => {
+    if (selectedJokerId === 'fish') {
+      void applyFishJoker();
+      return;
+    }
+
     if (selectedJokerId === 'shuffle') {
       void applyShuffleJoker();
       return;
@@ -530,7 +669,16 @@ export default function GameScreen() {
       return;
     }
 
-    if (selectedJokerId === 'shuffle' || selectedJokerId === 'party') {
+    if (selectedJokerId === 'swap') {
+      void handleSwapCellSelection(cell);
+      return;
+    }
+
+    if (
+      selectedJokerId === 'fish' ||
+      selectedJokerId === 'shuffle' ||
+      selectedJokerId === 'party'
+    ) {
       setSelectionMessage(
         `Seçilen joker: ${JOKER_MAP[selectedJokerId].name}. ${getActiveJokerInstruction(selectedJokerId)}`
       );
@@ -543,18 +691,28 @@ export default function GameScreen() {
   const handleDragStart = (cell: Cell) => {
     dragMovedRef.current = false;
 
-    if (selectedJokerId === 'lollipop' || selectedJokerId === 'wheel') {
+    if (
+      selectedJokerId === 'lollipop' ||
+      selectedJokerId === 'wheel' ||
+      selectedJokerId === 'swap'
+    ) {
       lastTargetedJokerGestureAtRef.current = Date.now();
 
       if (selectedJokerId === 'lollipop') {
         void applyLollipopJoker(cell);
-      } else {
+      } else if (selectedJokerId === 'wheel') {
         void applyWheelJoker(cell);
+      } else {
+        void handleSwapCellSelection(cell);
       }
       return;
     }
 
-    if (selectedJokerId === 'shuffle' || selectedJokerId === 'party') {
+    if (
+      selectedJokerId === 'fish' ||
+      selectedJokerId === 'shuffle' ||
+      selectedJokerId === 'party'
+    ) {
       setSelectionMessage(
         `Seçilen joker: ${JOKER_MAP[selectedJokerId].name}. ${getActiveJokerInstruction(selectedJokerId)}`
       );
@@ -566,8 +724,10 @@ export default function GameScreen() {
 
   const handleDragMove = (cell: Cell) => {
     if (
+      selectedJokerId === 'fish' ||
       selectedJokerId === 'lollipop' ||
       selectedJokerId === 'wheel' ||
+      selectedJokerId === 'swap' ||
       selectedJokerId === 'shuffle' ||
       selectedJokerId === 'party'
     ) {
@@ -582,8 +742,10 @@ export default function GameScreen() {
 
   const handleDragEnd = () => {
     if (
+      selectedJokerId === 'fish' ||
       selectedJokerId === 'lollipop' ||
       selectedJokerId === 'wheel' ||
+      selectedJokerId === 'swap' ||
       selectedJokerId === 'shuffle' ||
       selectedJokerId === 'party'
     ) {
@@ -616,6 +778,13 @@ export default function GameScreen() {
 
     if (isInteractionLocked) {
       setSelectionMessage('Tahta hazırlanıyor veya joker uygulanıyor, biraz bekle.');
+      return;
+    }
+
+    if (selectedJokerId === 'swap') {
+      setSelectionMessage(
+        'Serbest Değiştirme aktif. İkinci komşu hücreyi seç ya da joker seçimini kaldır.'
+      );
       return;
     }
 
@@ -669,7 +838,9 @@ export default function GameScreen() {
       return;
     }
 
-    const gainedScore = calculateWordScore(normalizedWord);
+    const comboAnalysis = analyzeComboWords(normalizedWord);
+    const baseScore = calculateWordScore(normalizedWord);
+    const gainedScore = comboAnalysis.totalScore;
     const nextScore = score + gainedScore;
     const nextFoundWords = [normalizedWord, ...foundWords];
     const createdSpecialType = getSpecialTypeForWordLength(normalizedWord.length);
@@ -682,12 +853,14 @@ export default function GameScreen() {
 
     setScore(nextScore);
     setFoundWords(nextFoundWords);
+    setLastComboAnalysis(comboAnalysis);
 
     if (nextMovesLeft === 0) {
       await finishGame(nextScore, nextFoundWords);
       return;
     }
 
+    const comboSummaryText = getComboSummaryText(comboAnalysis);
     const createdSpecialText = createdSpecialType
       ? ` Yeni özel taş: ${getSpecialName(createdSpecialType)} ${getSpecialLabel(createdSpecialType)}.`
       : '';
@@ -701,7 +874,7 @@ export default function GameScreen() {
       setPossibleWordCount(fallback.analysis.possibleWordCount);
       syncSelection([], fallback.board);
       setSelectionMessage(
-        `Geçerli kelime: ${normalizedWord}. +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText} Tahtada kelime kalmadığı için yeni tahta üretildi.`
+        `Geçerli kelime: ${normalizedWord}. Ana puan +${baseScore}.${comboSummaryText} Toplam +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText} Tahtada kelime kalmadığı için yeni tahta üretildi.`
       );
       return;
     }
@@ -709,7 +882,7 @@ export default function GameScreen() {
     setPossibleWordCount(analysis.possibleWordCount);
     syncSelection([], matchedBoard);
     setSelectionMessage(
-      `Geçerli kelime: ${normalizedWord}. +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText}`
+      `Geçerli kelime: ${normalizedWord}. Ana puan +${baseScore}.${comboSummaryText} Toplam +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText}`
     );
   };
 
@@ -770,6 +943,19 @@ export default function GameScreen() {
         <Text style={styles.messageText}>{selectionMessage}</Text>
       </View>
 
+      {lastComboAnalysis && (
+        <View style={styles.comboCard}>
+          <Text style={styles.comboTitle}>Son Combo</Text>
+          <Text style={styles.comboStatus}>
+            {lastComboAnalysis.hasCombo ? 'Combo bulundu' : 'Ek combo bulunamadı'}
+          </Text>
+          <Text style={styles.comboWords}>
+            Kelimeler: {lastComboAnalysis.comboWords.join(', ')}
+          </Text>
+          <Text style={styles.comboScore}>Ek Combo Puanı: +{lastComboAnalysis.bonusScore}</Text>
+        </View>
+      )}
+
       <View style={styles.boardSection}>
         {board.length > 0 && (
           <GameGrid
@@ -797,7 +983,9 @@ export default function GameScreen() {
             {JOKER_MAP[selectedJokerId].name}: {getActiveJokerInstruction(selectedJokerId)}
           </Text>
 
-          {(selectedJokerId === 'shuffle' || selectedJokerId === 'party') && (
+          {(selectedJokerId === 'fish' ||
+            selectedJokerId === 'shuffle' ||
+            selectedJokerId === 'party') && (
             <Pressable
               style={[styles.jokerActionButton, isInteractionLocked && styles.disabledButton]}
               onPress={handleApplySelectedJoker}
@@ -952,6 +1140,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.mutedText,
     lineHeight: 20,
+  },
+  comboCard: {
+    marginTop: 14,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#6EE7B7',
+    gap: 8,
+  },
+  comboTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  comboStatus: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  comboWords: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: COLORS.text,
+  },
+  comboScore: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.success,
   },
   boardSection: {
     marginTop: 20,
