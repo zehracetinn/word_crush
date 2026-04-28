@@ -48,6 +48,7 @@ export const useAppStore = create<AppStore>((set) => ({
 
   clearProfile: async () => {
     await storageService.clearUserProfile();
-    set({ profile: null });
+    const profile = await storageService.getUserProfile();
+    set({ profile });
   },
 }));

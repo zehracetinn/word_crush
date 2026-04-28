@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { GameResult } from '../src/models/game-result';
 import { storageService } from '../src/services/storage.service';
+import { useAppStore } from '../src/store/app-store';
 import { COLORS } from '../src/theme/colors';
 import {
   buildScoreSummary,
@@ -11,19 +12,40 @@ import {
 } from '../src/utils/result-stats';
 
 export default function ScoreboardScreen() {
+  const { profile } = useAppStore();
   const [results, setResults] = useState<GameResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadResults();
-  }, []);
+    let isMounted = true;
 
-  const loadResults = async () => {
-    setIsLoading(true);
-    const data = await storageService.getGameResults();
-    setResults(data);
-    setIsLoading(false);
-  };
+    const loadResults = async () => {
+      if (!profile?.id) {
+        if (isMounted) {
+          setResults([]);
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      if (isMounted) {
+        setIsLoading(true);
+      }
+
+      const data = await storageService.getGameResults(profile.id);
+
+      if (isMounted) {
+        setResults(data);
+        setIsLoading(false);
+      }
+    };
+
+    void loadResults();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [profile?.id]);
 
   const summary = buildScoreSummary(results);
 
@@ -35,7 +57,9 @@ export default function ScoreboardScreen() {
 
       <Text style={styles.title}>Skor Tablosu</Text>
       <Text style={styles.subtitle}>
-        Burada oynanan oyunların geçmişi ve genel performans özeti gösterilir.
+        {profile
+          ? `${profile.username} kullanıcısına ait oyun geçmişi ve performans özeti gösterilir.`
+          : 'Aktif kullanıcı bulunamadı.'}
       </Text>
 
       <View style={styles.summaryCard}>
@@ -80,7 +104,11 @@ export default function ScoreboardScreen() {
         {isLoading ? (
           <Text style={styles.emptyText}>Yükleniyor...</Text>
         ) : results.length === 0 ? (
-          <Text style={styles.emptyText}>Henüz kayıtlı bir oyun sonucu yok.</Text>
+          <Text style={styles.emptyText}>
+            {profile
+              ? 'Bu kullanıcı için henüz kayıtlı bir oyun sonucu yok.'
+              : 'Önce bir kullanıcı seçmelisin.'}
+          </Text>
         ) : (
           results.map((item, index) => (
             <View key={item.id} style={styles.resultCard}>

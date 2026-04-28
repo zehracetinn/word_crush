@@ -34,8 +34,14 @@ export default function UsernameScreen() {
       return;
     }
 
-    await setUsername(trimmed);
-    router.replace('/home');
+    try {
+      await setUsername(trimmed);
+      router.replace('/home');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Profil açılırken bir hata oluştu.';
+      Alert.alert('Profil açılamadı', message);
+    }
   };
 
   return (
@@ -44,14 +50,12 @@ export default function UsernameScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.card}>
-        <Text style={styles.title}>
-          {isEditMode ? 'Kullanıcı Adını Güncelle' : 'Hoş Geldin'}
-        </Text>
+        <Text style={styles.title}>{isEditMode ? 'Oyuncu Değiştir' : 'Hoş Geldin'}</Text>
 
         <Text style={styles.subtitle}>
           {isEditMode
-            ? 'Ana ekranda görünecek kullanıcı adını güncelle.'
-            : 'Oyuna başlamadan önce kullanıcı adını gir.'}
+            ? 'Var olan bir kullanıcı adı girersen o profile geçilir. Yeni bir ad girersen yeni profil oluşturulur.'
+            : 'Kullanıcı adını gir. Bu ad daha önce kullanıldıysa mevcut profile geçilir, yoksa yeni profil oluşturulur.'}
         </Text>
 
         <TextInput
@@ -65,9 +69,9 @@ export default function UsernameScreen() {
           maxLength={20}
         />
 
-        <Pressable style={styles.button} onPress={handleSave}>
+        <Pressable style={styles.button} onPress={() => void handleSave()}>
           <Text style={styles.buttonText}>
-            {isEditMode ? 'Kaydet ve Dön' : 'Devam Et'}
+            {isEditMode ? 'Profili Aç' : 'Devam Et'}
           </Text>
         </Pressable>
 

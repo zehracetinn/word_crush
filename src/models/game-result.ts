@@ -1,5 +1,7 @@
 export interface GameResult {
   id: string;
+  playerId: string;
+  playerName: string;
   playedAt: string;
   gridSize: number;
   difficulty: string;

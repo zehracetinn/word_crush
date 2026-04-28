@@ -14,6 +14,7 @@ import JokerBar from '../src/components/JokerBar';
 import { JokerId, JOKER_MAP } from '../src/constants/joker-definitions';
 import { calculateWordScore } from '../src/constants/letter-scores';
 import { GameResult } from '../src/models/game-result';
+import { UserProfile } from '../src/models/user-profile';
 import { Cell } from '../src/models/cell';
 import { dictionaryService } from '../src/services/dictionary.service';
 import { storageService } from '../src/services/storage.service';
@@ -227,7 +228,11 @@ export default function GameScreen() {
     prepareFreshBoard('Tahta yeniden üretildi.');
   };
 
-  const buildGameResult = (finalScore: number, finalWords: string[]): GameResult => {
+  const buildGameResult = (
+    finalScore: number,
+    finalWords: string[],
+    activeProfile: UserProfile
+  ): GameResult => {
     const durationSeconds = Math.max(
       1,
       Math.floor((Date.now() - gameStartedAtRef.current) / 1000)
@@ -240,6 +245,8 @@ export default function GameScreen() {
 
     return {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      playerId: activeProfile.id,
+      playerName: activeProfile.username,
       playedAt: new Date().toISOString(),
       gridSize: parsedGridSize,
       difficulty: String(difficulty ?? '-'),
@@ -256,7 +263,11 @@ export default function GameScreen() {
     try {
       setIsFinishingGame(true);
 
-      const result = buildGameResult(finalScore, finalWords);
+      if (!profile) {
+        throw new Error('Aktif kullanıcı bulunamadı.');
+      }
+
+      const result = buildGameResult(finalScore, finalWords, profile);
       await storageService.saveGameResult(result);
 
       router.replace('/home');
