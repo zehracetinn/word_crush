@@ -1,18 +1,18 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Cell } from '../models/cell';
 import { getSpecialLabel } from '../utils/powerups';
 
 interface TileProps {
   cell: Cell;
   size: number;
-  onPress?: (cell: Cell) => void;
 }
 
-export default function Tile({ cell, size, onPress }: TileProps) {
+export default function Tile({ cell, size }: TileProps) {
   const specialLabel = getSpecialLabel(cell.specialType);
 
   return (
-    <Pressable
+    <View
+      pointerEvents="none"
       style={[
         styles.tile,
         {
@@ -22,7 +22,6 @@ export default function Tile({ cell, size, onPress }: TileProps) {
         cell.isSelected && styles.selectedTile,
         cell.specialType && styles.specialTile,
       ]}
-      onPress={() => onPress?.(cell)}
     >
       <Text style={[styles.letter, { fontSize: Math.max(22, size * 0.38) }]}>
         {cell.letter}
@@ -33,7 +32,7 @@ export default function Tile({ cell, size, onPress }: TileProps) {
           <Text style={styles.badgeText}>{specialLabel}</Text>
         </View>
       )}
-    </Pressable>
+    </View>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Dimensions,
   GestureResponderEvent,
@@ -7,6 +7,10 @@ import {
   View,
 } from 'react-native';
 import { Cell } from '../models/cell';
+import {
+  buildDragSelectionChain,
+  isSameCell,
+} from '../utils/selection';
 import Tile from './Tile';
 
 interface GameGridProps {
@@ -16,6 +20,8 @@ interface GameGridProps {
   onDragMove?: (cell: Cell) => void;
   onDragEnd?: () => void;
 }
+
+const DRAG_ACTIVATION_DISTANCE = 6;
 
 export default function GameGrid({
   board,
@@ -30,57 +36,177 @@ export default function GameGrid({
   const screenWidth = Dimensions.get('window').width;
   const boardPixelSize = Math.min(screenWidth - 40, 420);
   const tileSize =
-    gridSize > 0 ? Math.floor((boardPixelSize - padding * 2 - gap * (gridSize - 1)) / gridSize) : 0;
+    gridSize > 0
+      ? Math.floor((boardPixelSize - padding * 2 - gap * (gridSize - 1)) / gridSize)
+      : 0;
+  const contentSize =
+    gridSize > 0 ? tileSize * gridSize + gap * Math.max(gridSize - 1, 0) : 0;
 
-  const getCellFromTouch = (event: GestureResponderEvent): Cell | null => {
-    const { locationX, locationY } = event.nativeEvent;
+  const boardRef = useRef(board);
+  const onTilePressRef = useRef(onTilePress);
+  const onDragStartRef = useRef(onDragStart);
+  const onDragMoveRef = useRef(onDragMove);
+  const onDragEndRef = useRef(onDragEnd);
+  const gestureStartCellRef = useRef<Cell | null>(null);
+  const lastDragCellRef = useRef<Cell | null>(null);
+  const isDraggingRef = useRef(false);
 
-    const innerX = locationX - padding;
-    const innerY = locationY - padding;
+  useEffect(() => {
+    boardRef.current = board;
+  }, [board]);
 
-    if (innerX < 0 || innerY < 0) return null;
+  useEffect(() => {
+    onTilePressRef.current = onTilePress;
+  }, [onTilePress]);
 
-    const step = tileSize + gap;
-    const col = Math.floor(innerX / step);
-    const row = Math.floor(innerY / step);
+  useEffect(() => {
+    onDragStartRef.current = onDragStart;
+  }, [onDragStart]);
 
-    if (row < 0 || col < 0 || row >= gridSize || col >= gridSize) return null;
+  useEffect(() => {
+    onDragMoveRef.current = onDragMove;
+  }, [onDragMove]);
 
-    const offsetX = innerX % step;
-    const offsetY = innerY % step;
+  useEffect(() => {
+    onDragEndRef.current = onDragEnd;
+  }, [onDragEnd]);
 
-    if (offsetX > tileSize || offsetY > tileSize) return null;
+  const resetGestureState = useCallback(() => {
+    gestureStartCellRef.current = null;
+    lastDragCellRef.current = null;
+    isDraggingRef.current = false;
+  }, []);
 
-    return board[row]?.[col] ?? null;
-  };
+  const getCellFromTouch = useCallback(
+    (event: GestureResponderEvent): Cell | null => {
+      if (gridSize === 0 || tileSize <= 0 || contentSize <= 0) {
+        return null;
+      }
+
+      const { locationX, locationY } = event.nativeEvent;
+      const innerX = locationX - padding;
+      const innerY = locationY - padding;
+
+      if (innerX < 0 || innerY < 0 || innerX > contentSize || innerY > contentSize) {
+        return null;
+      }
+
+      const step = tileSize + gap;
+      const col = Math.max(
+        0,
+        Math.min(gridSize - 1, Math.round((innerX - tileSize / 2) / step))
+      );
+      const row = Math.max(
+        0,
+        Math.min(gridSize - 1, Math.round((innerY - tileSize / 2) / step))
+      );
+
+      return boardRef.current[row]?.[col] ?? null;
+    },
+    [contentSize, gap, gridSize, padding, tileSize]
+  );
+
+  const continueDragSelection = useCallback((nextCell: Cell) => {
+    const lastCell = lastDragCellRef.current;
+
+    if (!lastCell) {
+      lastDragCellRef.current = nextCell;
+      return;
+    }
+
+    if (isSameCell(lastCell, nextCell)) {
+      return;
+    }
+
+    const traversedCells = buildDragSelectionChain(boardRef.current, lastCell, nextCell);
+
+    traversedCells.forEach((cell) => {
+      onDragMoveRef.current?.(cell);
+    });
+
+    if (traversedCells.length > 0) {
+      lastDragCellRef.current = traversedCells[traversedCells.length - 1];
+      return;
+    }
+
+    lastDragCellRef.current = nextCell;
+  }, []);
+
+  const startDragSelection = useCallback((startCell: Cell) => {
+    if (isDraggingRef.current) {
+      return;
+    }
+
+    isDraggingRef.current = true;
+    lastDragCellRef.current = startCell;
+    onDragStartRef.current?.(startCell);
+  }, []);
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
 
         onPanResponderGrant: (event) => {
           const cell = getCellFromTouch(event);
-          if (!cell) return;
-          onDragStart?.(cell);
+          gestureStartCellRef.current = cell;
+          lastDragCellRef.current = cell;
+          isDraggingRef.current = false;
         },
 
-        onPanResponderMove: (event) => {
-          const cell = getCellFromTouch(event);
-          if (!cell) return;
-          onDragMove?.(cell);
+        onPanResponderMove: (event, gestureState) => {
+          const startCell = gestureStartCellRef.current;
+          const currentCell = getCellFromTouch(event);
+
+          if (!startCell || !currentCell) {
+            return;
+          }
+
+          const movedEnough =
+            Math.max(Math.abs(gestureState.dx), Math.abs(gestureState.dy)) >=
+            DRAG_ACTIVATION_DISTANCE;
+
+          if (!isDraggingRef.current) {
+            if (!movedEnough && isSameCell(startCell, currentCell)) {
+              return;
+            }
+
+            startDragSelection(startCell);
+          }
+
+          continueDragSelection(currentCell);
         },
 
         onPanResponderRelease: () => {
-          onDragEnd?.();
+          const startCell = gestureStartCellRef.current;
+          const wasDragging = isDraggingRef.current;
+
+          resetGestureState();
+
+          if (wasDragging) {
+            onDragEndRef.current?.();
+            return;
+          }
+
+          if (startCell) {
+            onTilePressRef.current?.(startCell);
+          }
         },
 
         onPanResponderTerminate: () => {
-          onDragEnd?.();
+          const wasDragging = isDraggingRef.current;
+
+          resetGestureState();
+
+          if (wasDragging) {
+            onDragEndRef.current?.();
+          }
         },
       }),
-    [board, gridSize, tileSize, onDragStart, onDragMove, onDragEnd]
+    [continueDragSelection, getCellFromTouch, resetGestureState, startDragSelection]
   );
 
   return (
@@ -89,9 +215,9 @@ export default function GameGrid({
       {...panResponder.panHandlers}
     >
       {board.map((row, rowIndex) => (
-        <View key={`row-${rowIndex}`} style={[styles.row, { gap }]}>
+        <View key={`row-${rowIndex}`} style={[styles.row, { gap }]}> 
           {row.map((cell) => (
-            <Tile key={cell.id} cell={cell} size={tileSize} onPress={onTilePress} />
+            <Tile key={cell.id} cell={cell} size={tileSize} />
           ))}
         </View>
       ))}
