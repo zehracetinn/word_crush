@@ -1,23 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  BackHandler,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import GameGrid from '../src/components/GameGrid';
+import JokerBar from '../src/components/JokerBar';
+import { JokerId, JOKER_MAP } from '../src/constants/joker-definitions';
 import { calculateWordScore } from '../src/constants/letter-scores';
 import { GameResult } from '../src/models/game-result';
 import { Cell } from '../src/models/cell';
 import { dictionaryService } from '../src/services/dictionary.service';
 import { storageService } from '../src/services/storage.service';
-import { COLORS } from '../src/theme/colors';
-
-import { resolveBoardAfterMatch } from '../src/utils/board-actions';
-import { getSpecialLabel, getSpecialName, getSpecialTypeForWordLength } from '../src/utils/powerups';
-import { analyzeBoard } from '../src/utils/board-analyzer';
-import { generateSmartPlayableBoard } from '../src/utils/smart-board-generator';
-import JokerBar from '../src/components/JokerBar';
-import { JokerId, JOKER_MAP } from '../src/constants/joker-definitions';
 import { useAppStore } from '../src/store/app-store';
-
-
+import { COLORS } from '../src/theme/colors';
+import {
+  resolveBoardAfterMatch,
+  resolveBoardAfterSingleCellRemoval,
+  shuffleBoardForJoker,
+} from '../src/utils/board-actions';
+import { analyzeBoard } from '../src/utils/board-analyzer';
+import {
+  getSpecialLabel,
+  getSpecialName,
+  getSpecialTypeForWordLength,
+} from '../src/utils/powerups';
 import {
   applyPathSelection,
   areAdjacent,
@@ -25,6 +37,7 @@ import {
   isCellInPath,
   isSameCell,
 } from '../src/utils/selection';
+import { generateSmartPlayableBoard } from '../src/utils/smart-board-generator';
 
 export default function GameScreen() {
   const { gridSize, moves, difficulty } = useLocalSearchParams<{
@@ -48,18 +61,22 @@ export default function GameScreen() {
   const [possibleWordCount, setPossibleWordCount] = useState(0);
   const [isBoardPreparing, setIsBoardPreparing] = useState(true);
   const [isFinishingGame, setIsFinishingGame] = useState(false);
+  const [selectedJokerId, setSelectedJokerId] = useState<JokerId | null>(null);
+  const [isApplyingJoker, setIsApplyingJoker] = useState(false);
 
   const gameStartedAtRef = useRef<number>(Date.now());
   const selectedPathRef = useRef<Cell[]>([]);
-const dragMovedRef = useRef(false);
-const [selectedJokerId, setSelectedJokerId] = useState<JokerId | null>(null);
-const { profile, refreshProfile } = useAppStore();
+  const dragMovedRef = useRef(false);
+  const lastLollipopGestureAtRef = useRef(0);
+
+  const { profile, refreshProfile, consumeJoker } = useAppStore();
 
   const currentWord = useMemo(() => buildWordFromPath(selectedPath), [selectedPath]);
   const currentWordScore = useMemo(
     () => calculateWordScore(currentWord.toLocaleUpperCase('tr-TR')),
     [currentWord]
   );
+  const isInteractionLocked = isBoardPreparing || isFinishingGame || isApplyingJoker;
 
   useEffect(() => {
     let mounted = true;
@@ -84,41 +101,46 @@ const { profile, refreshProfile } = useAppStore();
       mounted = false;
     };
   }, []);
+
   useEffect(() => {
-  void refreshProfile();
-}, [refreshProfile]);
+    void refreshProfile();
+  }, [refreshProfile]);
 
   const syncSelection = (nextPath: Cell[], baseBoard?: Cell[][]) => {
-  const boardToUse = baseBoard ?? board;
-  selectedPathRef.current = nextPath;
-  setSelectedPath(nextPath);
-  setBoard(applyPathSelection(boardToUse, nextPath));
-};
+    const boardToUse = baseBoard ?? board;
+    selectedPathRef.current = nextPath;
+    setSelectedPath(nextPath);
+    setBoard(applyPathSelection(boardToUse, nextPath));
+  };
 
   const prepareFreshBoard = (customMessage?: string) => {
     if (!dictionaryReady) return;
 
     setIsBoardPreparing(true);
 
-    const { board: playableBoard, analysis, guaranteedWord } = generateSmartPlayableBoard(parsedGridSize);
+    const {
+      board: playableBoard,
+      analysis,
+      guaranteedWord,
+    } = generateSmartPlayableBoard(parsedGridSize);
 
-    selectedPathRef.current = [];
-    setBoard(applyPathSelection(playableBoard, []));
-    setSelectedPath([]);
+    dragMovedRef.current = false;
+    syncSelection([], playableBoard);
     setPossibleWordCount(analysis.possibleWordCount);
     setIsBoardPreparing(false);
 
     if (customMessage) {
-  setSelectionMessage(customMessage);
-} else {
-  setSelectionMessage(
-    guaranteedWord
-      ? `Tahta hazır. Uzun kelime fırsatı yerleştirildi: ${guaranteedWord.length} harf.`
-      : analysis.possibleWordCount > 0
-      ? `Tahta hazır. Yaklaşık ${analysis.possibleWordCount} oynanabilir kelime var.`
-      : 'Tahta üretildi.'
-  );
-}
+      setSelectionMessage(customMessage);
+      return;
+    }
+
+    setSelectionMessage(
+      guaranteedWord
+        ? `Tahta hazır. Uzun kelime fırsatı yerleştirildi: ${guaranteedWord.length} harf.`
+        : analysis.possibleWordCount > 0
+          ? `Tahta hazır. Yaklaşık ${analysis.possibleWordCount} oynanabilir kelime var.`
+          : 'Tahta üretildi.'
+    );
   };
 
   useEffect(() => {
@@ -128,26 +150,42 @@ const { profile, refreshProfile } = useAppStore();
     setScore(0);
     setMovesLeft(parsedMoves);
     setFoundWords([]);
+    setSelectedJokerId(null);
     prepareFreshBoard('Yeni oyun hazırlandı.');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedGridSize, parsedMoves, dictionaryReady]);
 
   const clearSelection = () => {
     syncSelection([]);
     setSelectionMessage('Seçim temizlendi.');
   };
-  const handleSelectJoker = (jokerId: JokerId) => {
-  setSelectedJokerId((prev) => {
-    const next = prev === jokerId ? null : jokerId;
 
-    if (next) {
-      setSelectionMessage(`Seçilen joker: ${JOKER_MAP[next].name}. Etkiyi bir sonraki sprintte bağlayacağız.`);
-    } else {
-      setSelectionMessage('Joker seçimi kaldırıldı.');
+  const getActiveJokerInstruction = (jokerId: JokerId): string => {
+    switch (jokerId) {
+      case 'lollipop':
+        return 'Bir hücreye dokun. Seçilen tek harf silinip tahta aşağı düşecek.';
+      case 'shuffle':
+        return 'Tahtadaki harfleri karıştırmak için aşağıdaki uygula butonunu kullan.';
+      default:
+        return 'Etkiyi bir sonraki sprintte bağlayacağız.';
+    }
+  };
+
+  const handleSelectJoker = (jokerId: JokerId) => {
+    const nextJokerId = selectedJokerId === jokerId ? null : jokerId;
+
+    if (nextJokerId === 'lollipop' || nextJokerId === 'shuffle') {
+      dragMovedRef.current = false;
+      syncSelection([]);
     }
 
-    return next;
-  });
-};
+    setSelectedJokerId(nextJokerId);
+    setSelectionMessage(
+      nextJokerId
+        ? `Seçilen joker: ${JOKER_MAP[nextJokerId].name}. ${getActiveJokerInstruction(nextJokerId)}`
+        : 'Joker seçimi kaldırıldı.'
+    );
+  };
 
   const regenerateBoard = () => {
     if (!dictionaryReady) {
@@ -158,10 +196,7 @@ const { profile, refreshProfile } = useAppStore();
     prepareFreshBoard('Tahta yeniden üretildi.');
   };
 
-  const buildGameResult = (
-    finalScore: number,
-    finalWords: string[]
-  ): GameResult => {
+  const buildGameResult = (finalScore: number, finalWords: string[]): GameResult => {
     const durationSeconds = Math.max(
       1,
       Math.floor((Date.now() - gameStartedAtRef.current) / 1000)
@@ -184,10 +219,7 @@ const { profile, refreshProfile } = useAppStore();
     };
   };
 
-  const finishGame = async (
-    finalScore: number,
-    finalWords: string[]
-  ) => {
+  const finishGame = async (finalScore: number, finalWords: string[]) => {
     if (isFinishingGame) return;
 
     try {
@@ -204,7 +236,8 @@ const { profile, refreshProfile } = useAppStore();
       setIsFinishingGame(false);
     }
   };
-    const confirmExitGame = () => {
+
+  const confirmExitGame = () => {
     if (isFinishingGame) return;
 
     Alert.alert(
@@ -225,99 +258,244 @@ const { profile, refreshProfile } = useAppStore();
       ]
     );
   };
-    useEffect(() => {
-    const subscription = BackHandler.addEventListener(
-      'hardwareBackPress',
-      () => {
-        confirmExitGame();
-        return true;
-      }
-    );
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      confirmExitGame();
+      return true;
+    });
 
     return () => subscription.remove();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [score, foundWords, isFinishingGame]);
 
-    const processCellSelection = (cell: Cell, mode: 'tap' | 'drag'): boolean => {
-  if (isBoardPreparing || isFinishingGame) {
-    setSelectionMessage('Tahta hazırlanıyor, biraz bekle.');
-    return false;
-  }
-
-  if (movesLeft <= 0) {
-    setSelectionMessage('Hamle kalmadı. Yeni oyun başlatmalısın.');
-    return false;
-  }
-
-  if (!dictionaryReady) {
-    setSelectionMessage('Sözlük henüz yükleniyor, biraz bekle.');
-    return false;
-  }
-
-  if (selectedPathRef.current.length === 0) {
-    syncSelection([cell]);
-    setSelectionMessage(mode === 'drag' ? 'Sürükleme başladı.' : 'Seçim başladı.');
-    return true;
-  }
-
-  const lastCell = selectedPathRef.current[selectedPathRef.current.length - 1];
-
-  if (isSameCell(cell, lastCell)) {
-    return false;
-  }
-
-  if (isCellInPath(cell, selectedPathRef.current)) {
-    return false;
-  }
-
-  if (!areAdjacent(lastCell, cell)) {
-    if (mode === 'tap') {
-      setSelectionMessage('Sadece komşu hücreler seçilebilir.');
+  const ensureJokerReady = (jokerId: JokerId): boolean => {
+    if (isInteractionLocked) {
+      setSelectionMessage('Joker uygulanıyor veya tahta hazırlanıyor, biraz bekle.');
+      return false;
     }
-    return false;
-  }
 
-  const nextPath = [...selectedPathRef.current, cell];
-  syncSelection(nextPath);
-  setSelectionMessage(
-    mode === 'drag' ? 'Sürükleyerek seçim devam ediyor.' : 'Komşu harf seçildi.'
-  );
-  return true;
-};
+    if (!dictionaryReady) {
+      setSelectionMessage('Sözlük henüz hazır değil.');
+      return false;
+    }
+
+    if (movesLeft <= 0) {
+      setSelectionMessage('Hamle kalmadı. Joker artık kullanılamaz.');
+      return false;
+    }
+
+    if (board.length === 0) {
+      setSelectionMessage('Tahta henüz hazır değil.');
+      return false;
+    }
+
+    if (!profile) {
+      setSelectionMessage('Profil yüklenemedi.');
+      return false;
+    }
+
+    const ownedCount = profile.ownedJokers?.[jokerId] ?? 0;
+
+    if (ownedCount <= 0) {
+      setSelectedJokerId(null);
+      setSelectionMessage(`${JOKER_MAP[jokerId].name} envanterinde kalmadı.`);
+      return false;
+    }
+
+    return true;
+  };
+
+  const processCellSelection = (cell: Cell, mode: 'tap' | 'drag'): boolean => {
+    if (isInteractionLocked) {
+      setSelectionMessage('Tahta hazırlanıyor veya joker uygulanıyor, biraz bekle.');
+      return false;
+    }
+
+    if (movesLeft <= 0) {
+      setSelectionMessage('Hamle kalmadı. Yeni oyun başlatmalısın.');
+      return false;
+    }
+
+    if (!dictionaryReady) {
+      setSelectionMessage('Sözlük henüz yükleniyor, biraz bekle.');
+      return false;
+    }
+
+    if (selectedPathRef.current.length === 0) {
+      syncSelection([cell]);
+      setSelectionMessage(mode === 'drag' ? 'Sürükleme başladı.' : 'Seçim başladı.');
+      return true;
+    }
+
+    const lastCell = selectedPathRef.current[selectedPathRef.current.length - 1];
+
+    if (isSameCell(cell, lastCell) || isCellInPath(cell, selectedPathRef.current)) {
+      return false;
+    }
+
+    if (!areAdjacent(lastCell, cell)) {
+      if (mode === 'tap') {
+        setSelectionMessage('Sadece komşu hücreler seçilebilir.');
+      }
+      return false;
+    }
+
+    const nextPath = [...selectedPathRef.current, cell];
+    syncSelection(nextPath);
+    setSelectionMessage(
+      mode === 'drag' ? 'Sürükleyerek seçim devam ediyor.' : 'Komşu harf seçildi.'
+    );
+    return true;
+  };
+
+  const applyLollipopJoker = async (cell: Cell) => {
+    if (!ensureJokerReady('lollipop')) {
+      return;
+    }
+
+    try {
+      setIsApplyingJoker(true);
+
+      const nextBoard = resolveBoardAfterSingleCellRemoval(board, cell);
+      const analysis = analyzeBoard(nextBoard);
+
+      await consumeJoker('lollipop');
+
+      setSelectedJokerId(null);
+
+      if (analysis.possibleWordCount === 0) {
+        const fallback = generateSmartPlayableBoard(board.length);
+        setPossibleWordCount(fallback.analysis.possibleWordCount);
+        syncSelection([], fallback.board);
+        setSelectionMessage(
+          `Lolipop Kırıcı kullanıldı. ${cell.letter} harfi silindi ve tahta oynanabilir kalsın diye yeniden kuruldu.`
+        );
+        return;
+      }
+
+      setPossibleWordCount(analysis.possibleWordCount);
+      syncSelection([], nextBoard);
+      setSelectionMessage(
+        `Lolipop Kırıcı kullanıldı. ${cell.letter} harfi silindi, gravity ve refill uygulandı.`
+      );
+    } catch (error) {
+      console.error('Lolipop Kırıcı kullanılamadı:', error);
+      setSelectionMessage('Lolipop Kırıcı uygulanamadı.');
+    } finally {
+      setIsApplyingJoker(false);
+    }
+  };
+
+  const applyShuffleJoker = async () => {
+    if (!ensureJokerReady('shuffle')) {
+      return;
+    }
+
+    try {
+      setIsApplyingJoker(true);
+
+      const { board: shuffledBoard, analysis, usedFallback } = shuffleBoardForJoker(board);
+
+      await consumeJoker('shuffle');
+
+      setSelectedJokerId(null);
+      setPossibleWordCount(analysis.possibleWordCount);
+      syncSelection([], shuffledBoard);
+      setSelectionMessage(
+        usedFallback
+          ? 'Harf Karıştırma kullanıldı. Oynanabilir düzen bulunamadığı için yeni oynanabilir tahta kuruldu.'
+          : 'Harf Karıştırma kullanıldı. Tahtadaki harfler karıştırıldı.'
+      );
+    } catch (error) {
+      console.error('Harf Karıştırma kullanılamadı:', error);
+      setSelectionMessage('Harf Karıştırma uygulanamadı.');
+    } finally {
+      setIsApplyingJoker(false);
+    }
+  };
+
+  const shouldIgnoreRecentLollipopTap = (): boolean => {
+    if (Date.now() - lastLollipopGestureAtRef.current >= 300) {
+      return false;
+    }
+
+    lastLollipopGestureAtRef.current = 0;
+    return true;
+  };
 
   const handleTilePress = (cell: Cell) => {
-  processCellSelection(cell, 'tap');
-};
+    if (shouldIgnoreRecentLollipopTap()) {
+      return;
+    }
 
-const handleDragStart = (cell: Cell) => {
-  dragMovedRef.current = false;
-  processCellSelection(cell, 'drag');
-};
+    if (selectedJokerId === 'lollipop') {
+      void applyLollipopJoker(cell);
+      return;
+    }
 
-const handleDragMove = (cell: Cell) => {
-  const changed = processCellSelection(cell, 'drag');
-  if (changed) {
-    dragMovedRef.current = true;
-  }
-};
+    if (selectedJokerId === 'shuffle') {
+      setSelectionMessage(
+        `Seçilen joker: ${JOKER_MAP.shuffle.name}. ${getActiveJokerInstruction('shuffle')}`
+      );
+      return;
+    }
 
-const handleDragEnd = () => {
-  const path = selectedPathRef.current;
+    processCellSelection(cell, 'tap');
+  };
 
-  if (path.length === 0) return;
+  const handleDragStart = (cell: Cell) => {
+    dragMovedRef.current = false;
 
-  if (!dragMovedRef.current) {
-    setSelectionMessage('Seçim hazır. İstersen kelimeyi gönder.');
-    return;
-  }
+    if (selectedJokerId === 'lollipop') {
+      lastLollipopGestureAtRef.current = Date.now();
+      void applyLollipopJoker(cell);
+      return;
+    }
 
-  if (path.length < 3) {
-    setSelectionMessage('Sürükleme bitti. Geçerli deneme için en az 3 harf gerekli.');
-    return;
-  }
+    if (selectedJokerId === 'shuffle') {
+      setSelectionMessage(
+        `Seçilen joker: ${JOKER_MAP.shuffle.name}. ${getActiveJokerInstruction('shuffle')}`
+      );
+      return;
+    }
 
-  setSelectionMessage('Sürükleme bitti. Kelime otomatik gönderiliyor...');
-  void handlePreviewSubmit(path);
-};
+    processCellSelection(cell, 'drag');
+  };
+
+  const handleDragMove = (cell: Cell) => {
+    if (selectedJokerId === 'lollipop' || selectedJokerId === 'shuffle') {
+      return;
+    }
+
+    const changed = processCellSelection(cell, 'drag');
+    if (changed) {
+      dragMovedRef.current = true;
+    }
+  };
+
+  const handleDragEnd = () => {
+    if (selectedJokerId === 'lollipop' || selectedJokerId === 'shuffle') {
+      return;
+    }
+
+    const path = selectedPathRef.current;
+
+    if (path.length === 0) return;
+
+    if (!dragMovedRef.current) {
+      setSelectionMessage('Seçim hazır. İstersen kelimeyi gönder.');
+      return;
+    }
+
+    if (path.length < 3) {
+      setSelectionMessage('Sürükleme bitti. Geçerli deneme için en az 3 harf gerekli.');
+      return;
+    }
+
+    setSelectionMessage('Sürükleme bitti. Kelime otomatik gönderiliyor...');
+    void handlePreviewSubmit(path);
+  };
 
   const handlePreviewSubmit = async (pathOverride?: Cell[]) => {
     if (!dictionaryReady) {
@@ -325,8 +503,8 @@ const handleDragEnd = () => {
       return;
     }
 
-    if (isBoardPreparing || isFinishingGame) {
-      setSelectionMessage('Tahta hazırlanıyor, biraz bekle.');
+    if (isInteractionLocked) {
+      setSelectionMessage('Tahta hazırlanıyor veya joker uygulanıyor, biraz bekle.');
       return;
     }
 
@@ -337,12 +515,12 @@ const handleDragEnd = () => {
 
     const pathToUse = pathOverride ?? selectedPathRef.current;
 
-if (pathToUse.length === 0) {
-  setSelectionMessage('Önce bir kelime yolu seçmelisin.');
-  return;
-}
+    if (pathToUse.length === 0) {
+      setSelectionMessage('Önce bir kelime yolu seçmelisin.');
+      return;
+    }
 
-const normalizedWord = dictionaryService.normalizeWord(buildWordFromPath(pathToUse));
+    const normalizedWord = dictionaryService.normalizeWord(buildWordFromPath(pathToUse));
     const nextMovesLeft = Math.max(movesLeft - 1, 0);
     setMovesLeft(nextMovesLeft);
 
@@ -368,9 +546,7 @@ const normalizedWord = dictionaryService.normalizeWord(buildWordFromPath(pathToU
       return;
     }
 
-    const isValid = dictionaryService.isValidWord(normalizedWord);
-
-    if (!isValid) {
+    if (!dictionaryService.isValidWord(normalizedWord)) {
       syncSelection([]);
       setSelectionMessage(
         `Kelime sözlükte bulunamadı: ${normalizedWord}. 1 hamle harcandı.`
@@ -385,16 +561,13 @@ const normalizedWord = dictionaryService.normalizeWord(buildWordFromPath(pathToU
     const gainedScore = calculateWordScore(normalizedWord);
     const nextScore = score + gainedScore;
     const nextFoundWords = [normalizedWord, ...foundWords];
-
     const createdSpecialType = getSpecialTypeForWordLength(normalizedWord.length);
     const activatedSpecialCells = pathToUse.filter((item) => !!item.specialType);
-
     const matchedBoard = resolveBoardAfterMatch(board, pathToUse, {
-    createdSpecialType,
-    activatedSpecialCells,
+      createdSpecialType,
+      activatedSpecialCells,
     });
-
-const analysis = analyzeBoard(matchedBoard);
+    const analysis = analyzeBoard(matchedBoard);
 
     setScore(nextScore);
     setFoundWords(nextFoundWords);
@@ -404,51 +577,36 @@ const analysis = analyzeBoard(matchedBoard);
       return;
     }
 
-    if (analysis.possibleWordCount === 0) {
-      const { board: playableBoard, analysis: newAnalysis } =
-  generateSmartPlayableBoard(parsedGridSize);
-
-      setBoard(applyPathSelection(playableBoard, []));
-      setSelectedPath([]);
-      setPossibleWordCount(newAnalysis.possibleWordCount);
-
-      const createdSpecialText = createdSpecialType
-  ? ` Yeni özel taş: ${getSpecialName(createdSpecialType)} ${getSpecialLabel(createdSpecialType)}.`
-  : '';
-
+    const createdSpecialText = createdSpecialType
+      ? ` Yeni özel taş: ${getSpecialName(createdSpecialType)} ${getSpecialLabel(createdSpecialType)}.`
+      : '';
     const activatedSpecialText =
-    activatedSpecialCells.length > 0
+      activatedSpecialCells.length > 0
         ? ` ${activatedSpecialCells.length} özel güç tetiklendi.`
         : '';
 
-    setSelectionMessage(
-    `Geçerli kelime: ${normalizedWord}. +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText} Tahtada kelime kalmadığı için yeni tahta üretildi.`
-    );
+    if (analysis.possibleWordCount === 0) {
+      const fallback = generateSmartPlayableBoard(parsedGridSize);
+      setPossibleWordCount(fallback.analysis.possibleWordCount);
+      syncSelection([], fallback.board);
+      setSelectionMessage(
+        `Geçerli kelime: ${normalizedWord}. +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText} Tahtada kelime kalmadığı için yeni tahta üretildi.`
+      );
       return;
     }
 
     setPossibleWordCount(analysis.possibleWordCount);
     syncSelection([], matchedBoard);
-    
-    const createdSpecialText = createdSpecialType
-  ? ` Yeni özel taş: ${getSpecialName(createdSpecialType)} ${getSpecialLabel(createdSpecialType)}.`
-  : '';
-
-    const activatedSpecialText =
-    activatedSpecialCells.length > 0
-        ? ` ${activatedSpecialCells.length} özel güç tetiklendi.`
-        : '';
-
     setSelectionMessage(
-    `Geçerli kelime: ${normalizedWord}. +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText}`
+      `Geçerli kelime: ${normalizedWord}. +${gainedScore} puan kazandın.${createdSpecialText}${activatedSpecialText}`
     );
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <Pressable style={styles.backButton} onPress={confirmExitGame}>
+      <Pressable style={styles.backButton} onPress={confirmExitGame}>
         <Text style={styles.backButtonText}>← Oyundan Çık</Text>
-        </Pressable>
+      </Pressable>
 
       <Text style={styles.title}>Oyun Ekranı</Text>
       <Text style={styles.subtitle}>
@@ -503,45 +661,68 @@ const analysis = analyzeBoard(matchedBoard);
 
       <View style={styles.boardSection}>
         {board.length > 0 && (
-  <GameGrid
-    board={board}
-    onTilePress={handleTilePress}
-    onDragStart={handleDragStart}
-    onDragMove={handleDragMove}
-    onDragEnd={handleDragEnd}
-  />
-)}
+          <GameGrid
+            board={board}
+            onTilePress={handleTilePress}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            onDragEnd={handleDragEnd}
+          />
+        )}
       </View>
+
       {profile && (
-  <JokerBar
-    ownedJokers={profile.ownedJokers ?? {}}
-    selectedJokerId={selectedJokerId}
-    onSelect={handleSelectJoker}
-  />
-)}
+        <JokerBar
+          ownedJokers={profile.ownedJokers ?? {}}
+          selectedJokerId={selectedJokerId}
+          onSelect={handleSelectJoker}
+        />
+      )}
+
+      {selectedJokerId && (
+        <View style={styles.activeJokerCard}>
+          <Text style={styles.activeJokerTitle}>Seçili Joker</Text>
+          <Text style={styles.activeJokerText}>
+            {JOKER_MAP[selectedJokerId].name}: {getActiveJokerInstruction(selectedJokerId)}
+          </Text>
+
+          {selectedJokerId === 'shuffle' && (
+            <Pressable
+              style={[styles.jokerActionButton, isInteractionLocked && styles.disabledButton]}
+              onPress={() => void applyShuffleJoker()}
+              disabled={isInteractionLocked}
+            >
+              <Text style={styles.jokerActionButtonText}>Seçili Jokeri Uygula</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
 
       <View style={styles.actionRow}>
-        <Pressable style={styles.secondaryButton} onPress={clearSelection}>
+        <Pressable
+          style={[styles.secondaryButton, isApplyingJoker && styles.disabledButton]}
+          onPress={clearSelection}
+          disabled={isApplyingJoker}
+        >
           <Text style={styles.secondaryButtonText}>Seçimi Temizle</Text>
         </Pressable>
 
         <Pressable
           style={[
             styles.primaryButton,
-            (!dictionaryReady || isBoardPreparing || isFinishingGame) &&
-              styles.disabledButton,
+            (!dictionaryReady || isInteractionLocked) && styles.disabledButton,
           ]}
-          onPress={() => void handlePreviewSubmit()} 
-          disabled={!dictionaryReady || isBoardPreparing || isFinishingGame}
+          onPress={() => void handlePreviewSubmit()}
+          disabled={!dictionaryReady || isInteractionLocked}
         >
           <Text style={styles.primaryButtonText}>Kelimeyi Gönder</Text>
         </Pressable>
       </View>
 
       <Pressable
-        style={[styles.regenerateButton, (isBoardPreparing || isFinishingGame) && styles.disabledButton]}
+        style={[styles.regenerateButton, isInteractionLocked && styles.disabledButton]}
         onPress={regenerateBoard}
-        disabled={isBoardPreparing || isFinishingGame}
+        disabled={isInteractionLocked}
       >
         <Text style={styles.regenerateButtonText}>Tahtayı Yeniden Üret</Text>
       </Pressable>
@@ -664,6 +845,37 @@ const styles = StyleSheet.create({
   boardSection: {
     marginTop: 20,
     marginBottom: 20,
+  },
+  activeJokerCard: {
+    marginTop: 14,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    gap: 10,
+  },
+  activeJokerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  activeJokerText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: COLORS.text,
+  },
+  jokerActionButton: {
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#EA580C',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  jokerActionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
   },
   actionRow: {
     flexDirection: 'row',

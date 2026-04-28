@@ -1,11 +1,19 @@
 import { Cell, SpecialType } from '../models/cell';
-import { createRandomCell } from './grid';
+import { BoardAnalysis, analyzeBoard } from './board-analyzer';
+import { createRandomCell, shuffleBoardContents } from './grid';
+import { generateSmartPlayableBoard } from './smart-board-generator';
 import { cellKey } from './selection';
 import { getAffectedCellsBySpecial } from './powerups';
 
 interface ResolveBoardOptions {
   createdSpecialType?: SpecialType | null;
   activatedSpecialCells?: Cell[];
+}
+
+export interface ShuffleBoardResult {
+  board: Cell[][];
+  analysis: BoardAnalysis;
+  usedFallback: boolean;
 }
 
 function createCellId(row: number, col: number): string {
@@ -129,4 +137,37 @@ export function resolveBoardAfterMatch(
   }
 
   return nextBoard;
+}
+
+export function resolveBoardAfterSingleCellRemoval(
+  board: Cell[][],
+  targetCell: Cell
+): Cell[][] {
+  return resolveBoardAfterMatch(board, [targetCell]);
+}
+
+export function shuffleBoardForJoker(
+  board: Cell[][],
+  maxAttempts: number = 30
+): ShuffleBoardResult {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const shuffledBoard = shuffleBoardContents(board);
+    const analysis = analyzeBoard(shuffledBoard);
+
+    if (analysis.possibleWordCount > 0) {
+      return {
+        board: shuffledBoard,
+        analysis,
+        usedFallback: false,
+      };
+    }
+  }
+
+  const fallback = generateSmartPlayableBoard(board.length);
+
+  return {
+    board: fallback.board,
+    analysis: fallback.analysis,
+    usedFallback: true,
+  };
 }

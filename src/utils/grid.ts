@@ -44,3 +44,41 @@ export function generateBoard(size: number): Cell[][] {
 export function flattenBoard(board: Cell[][]): Cell[] {
   return board.flat();
 }
+
+export function shuffleArray<T>(items: readonly T[]): T[] {
+  const nextItems = [...items];
+
+  for (let index = nextItems.length - 1; index > 0; index--) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [nextItems[index], nextItems[randomIndex]] = [
+      nextItems[randomIndex],
+      nextItems[index],
+    ];
+  }
+
+  return nextItems;
+}
+
+export function shuffleBoardContents(board: Cell[][]): Cell[][] {
+  const size = board.length;
+  const shuffledContents = shuffleArray(
+    flattenBoard(board).map((cell) => ({
+      letter: cell.letter,
+      specialType: cell.specialType ?? null,
+    }))
+  );
+
+  let contentIndex = 0;
+
+  return Array.from({ length: size }, (_, row) =>
+    Array.from({ length: size }, (_, col) => {
+      const content = shuffledContents[contentIndex++];
+      const nextCell = createCellWithLetter(row, col, content.letter);
+
+      return {
+        ...nextCell,
+        specialType: content.specialType,
+      };
+    })
+  );
+}
