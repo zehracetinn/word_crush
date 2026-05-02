@@ -22,6 +22,12 @@ interface GameGridProps {
 }
 
 const DRAG_ACTIVATION_DISTANCE = 6;
+const TOUCH_SAMPLE_DIVISOR = 3;
+
+interface TouchPoint {
+  x: number;
+  y: number;
+}
 
 export default function GameGrid({
   board,
@@ -41,6 +47,8 @@ export default function GameGrid({
       : 0;
   const contentSize =
     gridSize > 0 ? tileSize * gridSize + gap * Math.max(gridSize - 1, 0) : 0;
+  const contentOffset = (boardPixelSize - contentSize) / 2;
+  const touchTolerance = Math.max(14, gap + tileSize * 0.35);
 
   const boardRef = useRef(board);
   const onTilePressRef = useRef(onTilePress);
@@ -49,6 +57,7 @@ export default function GameGrid({
   const onDragEndRef = useRef(onDragEnd);
   const gestureStartCellRef = useRef<Cell | null>(null);
   const lastDragCellRef = useRef<Cell | null>(null);
+  const lastTouchPointRef = useRef<TouchPoint | null>(null);
   const isDraggingRef = useRef(false);
 
   useEffect(() => {
@@ -74,20 +83,31 @@ export default function GameGrid({
   const resetGestureState = useCallback(() => {
     gestureStartCellRef.current = null;
     lastDragCellRef.current = null;
+    lastTouchPointRef.current = null;
     isDraggingRef.current = false;
   }, []);
 
-  const getCellFromTouch = useCallback(
-    (event: GestureResponderEvent): Cell | null => {
+  const getTouchPoint = useCallback((event: GestureResponderEvent): TouchPoint => {
+    const { locationX, locationY } = event.nativeEvent;
+
+    return { x: locationX, y: locationY };
+  }, []);
+
+  const getCellFromPoint = useCallback(
+    (point: TouchPoint): Cell | null => {
       if (gridSize === 0 || tileSize <= 0 || contentSize <= 0) {
         return null;
       }
 
-      const { locationX, locationY } = event.nativeEvent;
-      const innerX = locationX - padding;
-      const innerY = locationY - padding;
+      const innerX = point.x - contentOffset;
+      const innerY = point.y - contentOffset;
 
-      if (innerX < 0 || innerY < 0 || innerX > contentSize || innerY > contentSize) {
+      if (
+        innerX < -touchTolerance ||
+        innerY < -touchTolerance ||
+        innerX > contentSize + touchTolerance ||
+        innerY > contentSize + touchTolerance
+      ) {
         return null;
       }
 
@@ -103,7 +123,43 @@ export default function GameGrid({
 
       return boardRef.current[row]?.[col] ?? null;
     },
-    [contentSize, gap, gridSize, padding, tileSize]
+    [contentOffset, contentSize, gap, gridSize, tileSize, touchTolerance]
+  );
+
+  const getCellsBetweenTouchPoints = useCallback(
+    (startPoint: TouchPoint, endPoint: TouchPoint): Cell[] => {
+      const distanceX = endPoint.x - startPoint.x;
+      const distanceY = endPoint.y - startPoint.y;
+      const distance = Math.hypot(distanceX, distanceY);
+      const sampleDistance = Math.max(4, tileSize / TOUCH_SAMPLE_DIVISOR);
+      const sampleCount = Math.max(1, Math.ceil(distance / sampleDistance));
+      const cells: Cell[] = [];
+      const visitedKeys = new Set<string>();
+
+      for (let index = 1; index <= sampleCount; index += 1) {
+        const point = {
+          x: startPoint.x + (distanceX * index) / sampleCount,
+          y: startPoint.y + (distanceY * index) / sampleCount,
+        };
+        const cell = getCellFromPoint(point);
+
+        if (!cell) {
+          continue;
+        }
+
+        const key = `${cell.row}-${cell.col}`;
+
+        if (visitedKeys.has(key)) {
+          continue;
+        }
+
+        visitedKeys.add(key);
+        cells.push(cell);
+      }
+
+      return cells;
+    },
+    [getCellFromPoint, tileSize]
   );
 
   const continueDragSelection = useCallback((nextCell: Cell) => {
@@ -151,17 +207,23 @@ export default function GameGrid({
         onMoveShouldSetPanResponderCapture: () => true,
 
         onPanResponderGrant: (event) => {
-          const cell = getCellFromTouch(event);
+          const touchPoint = getTouchPoint(event);
+          const cell = getCellFromPoint(touchPoint);
+
           gestureStartCellRef.current = cell;
           lastDragCellRef.current = cell;
+          lastTouchPointRef.current = touchPoint;
           isDraggingRef.current = false;
         },
 
         onPanResponderMove: (event, gestureState) => {
           const startCell = gestureStartCellRef.current;
-          const currentCell = getCellFromTouch(event);
+          const previousTouchPoint = lastTouchPointRef.current;
+          const currentTouchPoint = getTouchPoint(event);
+          const currentCell = getCellFromPoint(currentTouchPoint);
 
-          if (!startCell || !currentCell) {
+          if (!startCell) {
+            lastTouchPointRef.current = currentTouchPoint;
             return;
           }
 
@@ -170,14 +232,24 @@ export default function GameGrid({
             DRAG_ACTIVATION_DISTANCE;
 
           if (!isDraggingRef.current) {
-            if (!movedEnough && isSameCell(startCell, currentCell)) {
+            if (!movedEnough) {
               return;
             }
 
             startDragSelection(startCell);
           }
 
-          continueDragSelection(currentCell);
+          if (previousTouchPoint) {
+            getCellsBetweenTouchPoints(previousTouchPoint, currentTouchPoint).forEach(
+              (cell) => {
+                continueDragSelection(cell);
+              }
+            );
+          } else if (currentCell) {
+            continueDragSelection(currentCell);
+          }
+
+          lastTouchPointRef.current = currentTouchPoint;
         },
 
         onPanResponderRelease: () => {
@@ -206,7 +278,14 @@ export default function GameGrid({
           }
         },
       }),
-    [continueDragSelection, getCellFromTouch, resetGestureState, startDragSelection]
+    [
+      continueDragSelection,
+      getCellFromPoint,
+      getCellsBetweenTouchPoints,
+      getTouchPoint,
+      resetGestureState,
+      startDragSelection,
+    ]
   );
 
   return (
