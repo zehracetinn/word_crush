@@ -42,7 +42,7 @@ export default function GameSetupScreen() {
             style={styles.card}
             onPress={() =>
               router.push({
-                pathname: '/game',
+                pathname: '/move-select',
                 params: {
                   gridSize: String(option.gridSize),
                   moves: String(option.moves),
