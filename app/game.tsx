@@ -958,11 +958,15 @@ export default function GameScreen() {
         <View style={styles.comboCard}>
           <Text style={styles.comboTitle}>Son Combo</Text>
           <Text style={styles.comboStatus}>
-            {lastComboAnalysis.hasCombo ? 'Combo bulundu' : 'Ek combo bulunamadı'}
+            Ana kelime: {lastComboAnalysis.mainWord}
           </Text>
-          <Text style={styles.comboWords}>
-            Kelimeler: {lastComboAnalysis.comboWords.join(', ')}
-          </Text>
+          {lastComboAnalysis.hasCombo ? (
+            <Text style={styles.comboWords}>
+              İçindeki alt kelimeler: {lastComboAnalysis.bonusWords.join(', ')}
+            </Text>
+          ) : (
+            <Text style={styles.comboWords}>Ek alt kelime bulunamadı.</Text>
+          )}
           <Text style={styles.comboScore}>Ek Combo Puanı: +{lastComboAnalysis.bonusScore}</Text>
         </View>
       )}

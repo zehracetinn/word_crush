@@ -50,14 +50,20 @@ function shuffle<T>(items: T[]): T[] {
 
 function getTargetLength(size: number): number {
   if (size <= 6) return 4;
-  if (size <= 8) return 5;
-  return 6;
+  if (size <= 8) return 4;
+  return 5;
 }
 
 function getLongWordEmbedChance(size: number): number {
-  if (size <= 6) return 0.35; // %35
-  if (size <= 8) return 0.45; // %45
-  return 0.50; // %50
+  if (size <= 6) return 0.70;
+  if (size <= 8) return 0.80;
+  return 0.85;
+}
+
+function getMinPossibleWordCount(size: number): number {
+  if (size <= 6) return 2;
+  if (size <= 8) return 3;
+  return 4;
 }
 
 function isInBounds(size: number, row: number, col: number): boolean {
@@ -135,17 +141,37 @@ function embedWordIntoBoard(size: number, word: string): Cell[][] | null {
 }
 
 function generateNormalPlayableBoard(size: number): SmartBoardResult {
-  for (let attempt = 0; attempt < 40; attempt++) {
+  const minWordCount = getMinPossibleWordCount(size);
+  let bestBoard: Cell[][] | null = null;
+  let bestAnalysis: BoardAnalysis | null = null;
+
+  for (let attempt = 0; attempt < 60; attempt++) {
     const board = generateBoard(size);
     const analysis = analyzeBoard(board);
 
-    if (analysis.possibleWordCount > 0) {
+    if (analysis.possibleWordCount >= minWordCount) {
       return {
         board,
         analysis,
         guaranteedWord: null,
       };
     }
+
+    if (
+      !bestAnalysis ||
+      analysis.possibleWordCount > bestAnalysis.possibleWordCount
+    ) {
+      bestBoard = board;
+      bestAnalysis = analysis;
+    }
+  }
+
+  if (bestBoard && bestAnalysis) {
+    return {
+      board: bestBoard,
+      analysis: bestAnalysis,
+      guaranteedWord: null,
+    };
   }
 
   const board = generateBoard(size);
@@ -163,15 +189,18 @@ function generateLongWordSupportedBoard(
   maxAttempts: number
 ): SmartBoardResult | null {
   const targetLength = getTargetLength(size);
+  const minWordCount = getMinPossibleWordCount(size);
 
-  const minLength = size <= 8 ? targetLength - 1 : targetLength - 1;
+  const minLength = targetLength - 1;
   const maxLength = targetLength;
 
   const candidateWords = shuffle(
     dictionaryService
       .getWordsByLength(Math.max(4, minLength), maxLength)
-      .filter((word) => word.length <= 8)
+      .filter((word) => word.length <= 7)
   );
+
+  let bestResult: SmartBoardResult | null = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const pickedWord =
@@ -184,12 +213,19 @@ function generateLongWordSupportedBoard(
 
     const analysis = analyzeBoard(board);
 
-    const hasDecentWord = analysis.foundPaths.some(
-      (item) => item.word.length >= Math.max(4, minLength)
-    );
-
-    if (analysis.possibleWordCount > 0 && hasDecentWord) {
+    if (analysis.possibleWordCount >= minWordCount) {
       return {
+        board,
+        analysis,
+        guaranteedWord: pickedWord,
+      };
+    }
+
+    if (
+      analysis.possibleWordCount > 0 &&
+      (!bestResult || analysis.possibleWordCount > bestResult.analysis.possibleWordCount)
+    ) {
+      bestResult = {
         board,
         analysis,
         guaranteedWord: pickedWord,
@@ -197,7 +233,7 @@ function generateLongWordSupportedBoard(
     }
   }
 
-  return null;
+  return bestResult;
 }
 
 export function generateSmartPlayableBoard(
