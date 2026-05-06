@@ -109,7 +109,7 @@ export default function GameScreen() {
   }, []);
 
   useEffect(() => {
-    void refreshProfile();
+    void Developer: Reload Windowile();
   }, [refreshProfile]);
 
   const syncSelection = (nextPath: Cell[], baseBoard?: Cell[][]) => {
